@@ -1,19 +1,24 @@
 -- Crea una función en PL/pgSQL llamada obtener_detalle_pedido que 
 -- reciba como parámetro el código de un pedido (codigo_pedido) y 
 -- devuelva todos los detalles de ese pedido (tabla detalle_pedido). 
--- La función debe devolver un conjunto de resultados (usar RETURNS TABLE).
+-- La función debe devolver un conjunto de resultados 
+-- (usar RETURNS TABLE).
 drop function if exists obtener_detalle_pedido;
 
 create or replace function obtener_detalle_pedido (p_codigo_pedido int) 
 returns table (
-	out_codigo_pedido int4,
-	out_codigo_producto varchar(15),
-	out_cantidad int4,
-	out_precio_unidad numeric(15, 2),
-	out_numero_linea int2
+	codigo_pedido int4,
+	codigo_producto varchar(15),
+	cantidad int4,
+	precio_unidad decimal(15, 2),
+	numero_linea int2
 ) as $$
 begin
-	return query select * from detalle_pedido dp 
+	return query select dp.codigo_pedido,  -- Usar el alias dp evita 
+						dp.codigo_producto,-- que se confunda con la salida
+						dp.cantidad,
+						dp.precio_unidad,
+						dp.numero_linea from detalle_pedido dp 
 		where dp.codigo_pedido = p_codigo_pedido;
 end;
 $$ language plpgsql;
@@ -23,20 +28,42 @@ select * from obtener_detalle_pedido(4);
 
 
 -- Crea una función llamada calcular_total_pedido que reciba como parámetro 
--- el código de un pedido (codigo_pedido) y calcule el total del pedido sumando 
--- el precio de todos los productos multiplicado por su cantidad. 
+-- el código de un pedido (codigo_pedido) y calcule el total del pedido 
+-- sumando el precio de todos los productos multiplicado por su cantidad. 
 -- La función debe devolver el total como un mensaje y como resultado.
 drop function if exists calcular_total_pedido;
 
 create or replace function calcular_total_pedido (p_codigo_pedido int4)
-returns numeric(10,2) as
+returns numeric(15,2) as
 $$
 declare
-	total numeric(10,2) := 0;
+	total numeric(15,2) := 0;
+	registro record;
+begin
+	select sum (dp.cantidad * dp.precio_unidad) into total 
+		from detalle_pedido dp
+		where dp.codigo_pedido = p_codigo_pedido;
+	-- Para evitar valores nulos
+	total := coalesce (total, 0);
+	raise notice 'El pedido % tiene un total de %' , p_codigo_pedido, total;
+	return total;
+end;
+$$ language plpgsql;
+
+select calcular_total_pedido(4);
+
+create or replace function calcular_total_pedido_v2 (p_codigo_pedido int4)
+returns numeric(15,2) as
+$$
+declare
+	total numeric(15,2) := 0;
 	registro record;
 begin
 	for registro in 
-		select * from detalle_pedido dp 
+		select	dp.codigo_producto, 
+				dp.cantidad,
+				dp.precio_unidad
+			from detalle_pedido dp 
 			where dp.codigo_pedido = p_codigo_pedido loop
 		raise notice '% - % - % -> %', registro.codigo_producto,
 									   registro.cantidad,
@@ -49,7 +76,12 @@ begin
 end;
 $$ language plpgsql;
 
-select calcular_total_pedido(2);
+select calcular_total_pedido_v2(2);
+
+
+
+
+
 
 -- Crea una función llamada obtener_pedidos_por_estado que reciba como 
 -- parámetro el estado de un pedido (estado) y devuelva todos los pedidos 
@@ -61,27 +93,25 @@ drop function if exists obtener_pedidos_por_estado;
 
 create or replace function obtener_pedidos_por_estado (p_estado varchar(15)) 
 returns table (
-	out_codigo_pedido int4,
-	out_fecha_pedido date,
-	out_fecha_esperada date,
-	out_fecha_entrega date,
-	out_estado varchar(15),
-	out_comentarios text,
-	out_codigo_cliente int4
+	codigo_pedido int4,
+	fecha_pedido date,
+	fecha_esperada date,
+	fecha_entrega date,
+	estado varchar(15),
+	comentarios text,
+	codigo_cliente int4
 ) as $$
-declare
-	registro record;
 begin
 	if p_estado = 'Entregado' or p_estado = 'Pendiente' then
 		return query 
-			select 	codigo_pedido,
-					fecha_pedido,
-					fecha_esperada,
-					fecha_entrega,
-					estado,
-					comentarios,
-					codigo_cliente			
-				from pedido where estado = p_estado;
+			select 	p.codigo_pedido,
+					p.fecha_pedido,
+					p.fecha_esperada,
+					p.fecha_entrega,
+					p.estado,
+					p.comentarios,
+					p.codigo_cliente			
+				from pedido p where p.estado = p_estado;
 	else 
 		raise exception 'Tipo de pedido no aceptado';
 	end if;
@@ -90,14 +120,14 @@ $$ language plpgsql;
 
 
 
-select * from obtener_pedidos_por_estado ('Entregados');
+select * from obtener_pedidos_por_estado ('En curso');
 
 
 -- Crea una función llamada sumar_stock_productos que reciba como 
 -- parámetro un número (incremento) y sume ese valor al stock de 
 -- todos los productos de la tabla producto. 
 -- La función debe devolver el número total de productos actualizados.
-drop function if exists with sumar_stock_productos;
+drop function if exists sumar_stock_productos;
 
 create or replace function sumar_stock_productos (incremento int) returns int
 as $$
@@ -106,7 +136,7 @@ declare
 	cur_producto cursor for select codigo_producto, cantidad_en_stock 
 								from producto;
 	v_codigo_producto varchar(15);
-	v_cantidad_en_stock int2;
+	v_cantidad_en_stock int2; -- pequeño ?? pero viene de bd
 begin
 	-- abrir cursor
 	open cur_producto;
@@ -129,7 +159,8 @@ $$ language plpgsql;
 
 select sumar_stock_productos (10);
 
-select * from producto;
+select codigo_producto, nombre, cantidad_en_stock  
+from producto order by codigo_producto;
 
 drop function if exists sumar_stock_productos_v2;
 
